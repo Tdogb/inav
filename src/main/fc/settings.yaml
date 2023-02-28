@@ -2136,7 +2136,24 @@ groups:
         field: fixedWingLevelTrimGain
         min: 0
         max: 20
-
+      - name: acro_trainer_angle_limit
+        description: ""
+        default_value: 20
+        field: acro_trainer_angle_limit
+        min: 0
+        max: 90
+      - name: acro_trainer_lookahead_ms
+        description: ""
+        default_value: 50
+        field: acro_trainer_lookahead_ms
+        min: 0
+        max: 100
+      - name: acro_trainer_gain
+        description: ""
+        default_value: 75
+        field: acro_trainer_gain
+        min: 0
+        max: 150
   - name: PG_PID_AUTOTUNE_CONFIG
     type: pidAutotuneConfig_t
     condition: USE_AUTOTUNE_FIXED_WING

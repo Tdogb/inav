@@ -309,6 +309,11 @@ PG_RESET_TEMPLATE(pidProfile_t, pidProfile,
         .smithPredictorDelay = SETTING_SMITH_PREDICTOR_DELAY_DEFAULT,
         .smithPredictorFilterHz = SETTING_SMITH_PREDICTOR_LPF_HZ_DEFAULT,
 #endif
+        // .iterm_relax_cutoff_high = 15,      
+        .acro_trainer_angle_limit = 20,
+        .acro_trainer_lookahead_ms = 50,
+        .acro_trainer_debug_axis = FD_ROLL,
+        .acro_trainer_gain = 75
 );
 
 FUNCTION_COMPILE_FOR_SIZE
@@ -814,10 +819,100 @@ static float FAST_CODE applyItermRelax(const int axis, float currentPidSetpoint,
 
     return itermErrorRate;
 }
+#define ACRO_TRAINER_SETPOINT_LIMIT       1000.0f // Limit the correcting setpoint
+#define ACRO_TRAINER_LOOKAHEAD_RATE_LIMIT 500.0f  // Max gyro rate for lookahead time scaling
+
+static float acroTrainerAngleLimit = 0;
+static float acroTrainerLookaheadTime = 0;
+static uint8_t acroTrainerDebugAxis = 0;
+static bool acroTrainerActive = 0;
+static int acroTrainerAxisState[2] = {0.0f,0.0f};  // only need roll and pitch
+static float acroTrainerGain = 0;
+
+int acroTrainerSign(float x)
+{
+    return x > 0 ? 1 : -1;
+}
+
+void pidAcroTrainerInit(void)
+{
+    acroTrainerAxisState[FD_ROLL] = 0;
+    acroTrainerAxisState[FD_PITCH] = 0;
+}
+
+static float FAST_CODE NOINLINE applyAcroTrainer(flight_dynamics_index_t axis, float setPoint)
+{
+float ret = setPoint;
+
+    if (!FLIGHT_MODE(ANGLE_MODE) && !FLIGHT_MODE(HORIZON_MODE) && !FLIGHT_MODE(NAV_RTH_MODE)) {
+        bool resetIterm = false;
+        float projectedAngle = 0;
+        const int setpointSign = acroTrainerSign(setPoint);
+        // const float currentAngle = (attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f;
+        const float currentAngle = (attitude.raw[axis]) / 10.0f;
+        const int angleSign = acroTrainerSign(currentAngle);
+
+        if ((acroTrainerAxisState[axis] != 0) && (acroTrainerAxisState[axis] != setpointSign)) {  // stick has reversed - stop limiting
+            acroTrainerAxisState[axis] = 0;
+        }
+
+        // Limit and correct the angle when it exceeds the limit
+        if ((fabsf(currentAngle) > acroTrainerAngleLimit) && (acroTrainerAxisState[axis] == 0)) {
+            if (angleSign == setpointSign) {
+                acroTrainerAxisState[axis] = angleSign;
+                resetIterm = true;
+            }
+        }
+
+        if (acroTrainerAxisState[axis] != 0) {
+            ret = constrainf(((acroTrainerAngleLimit * angleSign) - currentAngle) * acroTrainerGain, -ACRO_TRAINER_SETPOINT_LIMIT, ACRO_TRAINER_SETPOINT_LIMIT);
+        } else {
+
+        // Not currently over the limit so project the angle based on current angle and
+        // gyro angular rate using a sliding window based on gyro rate (faster rotation means larger window.
+        // If the projected angle exceeds the limit then apply limiting to minimize overshoot.
+            // Calculate the lookahead window by scaling proportionally with gyro rate from 0-500dps
+            float checkInterval = constrainf(fabsf(gyro.gyroADCf[axis]) / ACRO_TRAINER_LOOKAHEAD_RATE_LIMIT, 0.0f, 1.0f) * acroTrainerLookaheadTime;
+            projectedAngle = (gyro.gyroADCf[axis] * checkInterval) + currentAngle;
+            const int projectedAngleSign = acroTrainerSign(projectedAngle);
+            if ((fabsf(projectedAngle) > acroTrainerAngleLimit) && (projectedAngleSign == setpointSign)) {
+                ret = ((acroTrainerAngleLimit * projectedAngleSign) - projectedAngle) * acroTrainerGain;
+                resetIterm = true;
+            }
+        }
+
+        if (resetIterm) {
+            // pidData[axis].I = 0;
+            axisPID_I[axis] = 0;
+        }
+
+        // if (axis == acroTrainerDebugAxis) {
+        //     DEBUG_SET(DEBUG_ACRO_TRAINER, 0, lrintf(currentAngle * 10.0f));
+        //     DEBUG_SET(DEBUG_ACRO_TRAINER, 1, acroTrainerAxisState[axis]);
+        //     DEBUG_SET(DEBUG_ACRO_TRAINER, 2, lrintf(ret));
+        //     DEBUG_SET(DEBUG_ACRO_TRAINER, 3, lrintf(projectedAngle * 10.0f));
+        // }
+    }
+
+    return ret;
+}
+
+void pidSetAcroTrainerState(bool newState)
+{
+    if (acroTrainerActive != newState) {
+        if (newState) {
+            pidAcroTrainerInit();
+        }
+        acroTrainerActive = newState;
+    }
+}
 
 static void FAST_CODE NOINLINE pidApplyMulticopterRateController(pidState_t *pidState, flight_dynamics_index_t axis, float dT)
 {
 
+    if ((axis != FD_YAW) && acroTrainerActive && !FLIGHT_MODE(TURTLE_MODE)) {
+        pidState->rateTarget = applyAcroTrainer(axis, pidState->rateTarget);
+    }
     const float rateTarget = getFlightAxisRateOverride(axis, pidState->rateTarget);
 
     const float rateError = rateTarget - pidState->gyroRate;
@@ -1259,7 +1354,10 @@ void pidInit(void)
         2.0f,
         0.0f
     );
-
+    acroTrainerAngleLimit = pidProfile()->acro_trainer_angle_limit;
+    acroTrainerLookaheadTime = (float)pidProfile()->acro_trainer_lookahead_ms / 1000.0f;
+    // acroTrainerDebugAxis = pidProfile()->acro_trainer_debug_axis;
+    acroTrainerGain = (float)pidProfile()->acro_trainer_gain / 10.0f;
 }
 
 const pidBank_t * pidBank(void) {

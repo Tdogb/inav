@@ -97,6 +97,7 @@ static const box_t boxes[CHECKBOX_ITEM_COUNT + 1] = {
     { .boxId = BOXPLANWPMISSION,    .boxName = "WP PLANNER",        .permanentId = 55 },
     { .boxId = BOXSOARING,          .boxName = "SOARING",           .permanentId = 56 },
     { .boxId = BOXCHANGEMISSION,    .boxName = "MISSION CHANGE",    .permanentId = 59 },
+    { .boxId = BOXACROTRAINER,      .boxName = "ACRO TRAINER",      .permanentId = 60 },
     { .boxId = CHECKBOX_ITEM_COUNT, .boxName = NULL,                .permanentId = 0xFF }
 };
 
@@ -410,7 +411,7 @@ void packBoxModeFlags(boxBitmask_t * mspBoxModeFlags)
 #ifdef USE_MULTI_MISSION
     CHECK_ACTIVE_BOX(IS_ENABLED(IS_RC_MODE_ACTIVE(BOXCHANGEMISSION)),   BOXCHANGEMISSION);
 #endif
-
+    CHECK_ACTIVE_BOX(IS_ENABLED(IS_RC_MODE_ACTIVE(BOXACROTRAINER)),     BOXACROTRAINER);
     memset(mspBoxModeFlags, 0, sizeof(boxBitmask_t));
     for (uint32_t i = 0; i < activeBoxIdCount; i++) {
         if (activeBoxes[activeBoxIds[i]]) {

@@ -537,6 +537,7 @@ void tryArm(void)
 
         ENABLE_ARMING_FLAG(ARMED);
         ENABLE_ARMING_FLAG(WAS_EVER_ARMED);
+        pidAcroTrainerInit();
         //It is required to inform the mixer that arming was executed and it has to switch to the FORWARD direction
         ENABLE_STATE(SET_REVERSIBLE_MOTORS_FORWARD);
         logicConditionReset();
@@ -565,7 +566,7 @@ void tryArm(void)
         } else {
             beeper(BEEPER_ARMING);
         }
-
+        pidSetAcroTrainerState(IS_RC_MODE_ACTIVE(BOXACROTRAINER) && sensors(SENSOR_ACC));
         statsOnArm();
 
         return;
@@ -674,6 +675,14 @@ void processRx(timeUs_t currentTimeUs)
         DISABLE_FLIGHT_MODE(TURN_ASSISTANT);
     }
 
+    if (IS_RC_MODE_ACTIVE(BOXACROTRAINER) && sensors(SENSOR_ACC)) {
+        if (!FLIGHT_MODE(ACRO_TRAINER)) {
+            ENABLE_FLIGHT_MODE(ACRO_TRAINER);
+        }
+    } else {
+        DISABLE_FLIGHT_MODE(ACRO_TRAINER);
+    }
+
     if (sensors(SENSOR_ACC)) {
         if (IS_RC_MODE_ACTIVE(BOXHEADINGHOLD)) {
             if (!FLIGHT_MODE(HEADING_MODE)) {
@@ -709,6 +718,7 @@ void processRx(timeUs_t currentTimeUs)
             DISABLE_FLIGHT_MODE(MANUAL_MODE);
         }
     }
+
 
     /* In airmode Iterm should be prevented to grow when Low thottle and Roll + Pitch Centered.
        This is needed to prevent Iterm winding on the ground, but keep full stabilisation on 0 throttle while in air
